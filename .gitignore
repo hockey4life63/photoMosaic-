@@ -1,0 +1,5 @@
+node_modules
+source_images
+*.jpg
+*.png
+*.gif
