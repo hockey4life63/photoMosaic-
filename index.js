@@ -1,64 +1,18 @@
-/*data complier
-take in a relative file location(default ./source_images) and a starting number(default 0) and a total images you want processed(default 100)
-runs thru getAverageRgb stores filename, file extension, and rgb avg.
- {
-    type: 'confirm',
-    name: 'toBeDelivered',
-    message: 'Is this for delivery?',
-    default: false
-  },
-  {
-    type: 'input',
-    name: 'phone',
-    message: "What's your phone number?",
-    validate: function(value) {
-      var pass = value.match(
-        /^([01]{1})?[-.\s]?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})\s?((?:#|ext\.?\s?|x\.?\s?){1}(?:\d+)?)?$/i
-      )
-      if (pass) {
-        return true
-      }
-
-      return 'Please enter a valid phone number'
-    }
-  },
-  {
-    type: 'list',
-    name: 'size',
-    message: 'What size do you need?',
-    choices: ['Large', 'Medium', 'Small'],
-    filter: function(val) {
-      return val.toLowerCase()
-    }
-  },
-  {
-    type: 'input',
-    name: 'quantity',
-    message: 'How many do you need?',
-    validate: function(value) {
-      var valid = !isNaN(parseFloat(value))
-      return valid || 'Please enter a number'
-    },
-    filter: Number
-  },
-*/
 const inquirer = require('inquirer')
 const fs = require('fs')
 const mongoose = require("mongoose")
-const Image = require('./image')
-const Jimp = require('jimp')
+const ImageDb = require('./image')
 const average = require('image-average-color')
 const gm = require('gm')
-
-const pixelGetter = require("pixel-getter");
-
-
+const sharp = require('sharp');
+const canvas = require('canvas')
+const testImage = new canvas.Image;
 const DEFAULT_VALUES = {
     IMAGESOURCE: './source_images',
     STARTINGVALUE: 0,
     TOTALIMAGES: 10
 }
-
+const fileNames = {}
 mongoose.Promise = Promise
 
 mongoose.connect(process.env.MONGODB_URI || "mongodb://localhost/photoMoasic", {})
@@ -128,7 +82,7 @@ async function fileLoop(ele, index) {
                     const [r, g, b, a] = color
                     filename = ele
                     extension = ele.split().splice(-3).join('')
-                    const newImage = new Image({
+                    const newImage = new ImageDb({
                         r,
                         g,
                         b,
@@ -151,7 +105,7 @@ async function fileLoop(ele, index) {
 const changeSettings = _ =>
     inquirer.prompt(settings()).then(answer => {
         if (answer.option === 'Home') {
-          start()
+            start()
         } else {
             inquirer.prompt(settingsQuestions[answer.option]).then(input => {
                 current_values[answer.option] = input.ans
@@ -163,83 +117,149 @@ const changeSettings = _ =>
 
 const getImageAvg = async (imagePath, index) => {
     return new Promise(resolve => {
-       gm('./source_images/' + imagePath).resize(1, 1).toBuffer(function(err, buffer) {
-        const r = buffer.readUInt8(buffer.length - 3)
-        const g = buffer.readUInt8(buffer.length - 2)
-        const b = buffer.readUInt8(buffer.length - 1)
-        const filename = imagePath
-        const extension = imagePath.split().splice(-3).join('')
-        const newImage = new Image({
-            r,
-            g,
-            b,
-            filename,
-            extension
+        gm('./source_images/' + imagePath).resize(1, 1).toBuffer(function(err, buffer) {
+            const r = buffer.readUInt8(buffer.length - 3)
+            const g = buffer.readUInt8(buffer.length - 2)
+            const b = buffer.readUInt8(buffer.length - 1)
+            const filename = imagePath
+            const extension = imagePath.split().splice(-3).join('')
+            const newImage = new ImageDb({
+                r,
+                g,
+                b,
+                filename,
+                extension
+            })
+            newImage.save().then(_ => {
+                console.log('image info saved', index)
+                resolve('saved')
+            }).catch(err => console.log(err))
         })
-        newImage.save().then(_ => {
-            console.log('image info saved', index)
-            resolve('saved')
-        }).catch(err => console.log(err))
-    })
     })
 }
 
-const analyzePhoto = _=>{
-  inquirer.prompt([{
+const tileImage = (thisImage, i, option, ctx)=>{
+    let tileIndex = i
+    let offsetX = (tileIndex % option.sideCount) * option.tileWidth;
+    let offsetY = Math.floor(tileIndex / option.sideCount) * option.tileHeight;
+    let imgFile = fs.readFileSync(thisImage)
+    let img = new canvas.Image
+    img.src = imgFile
+    ctx.drawImage(img, offsetX, offsetY, option.tileWidth, option.tileHeight);
+    
+}
+
+const analyzePhoto = _ => {
+    inquirer.prompt([{
         type: 'input',
         name: 'filename',
         message: "Enter exact filename of file you want to analyze:",
-    },{
+    }, {
         type: 'input',
         name: 'sideCount',
         message: "Enter number of rows of photos you want:",
-    }]).then(option => {
-      gm('./source_images/'+option.filename)
-        .resize(option.sideCount, option.sideCount)
-        .toBuffer((err, buffer)=>{
-          pixelGetter.get(buffer, async (err, pixels)=>{
-            const docs =[]
-            for (var i = 0; i < pixels.length; i++) {
-              console.log(i)
-              let r = pixels[i].r
-              let g = pixels[i].g
-              let b = pixels[i].b
-              await Image.aggregate([
-               {'$project':{diff:
-                  {'$add':[
-                    {'$abs':{'$subtract':[r, '$r']}},
-                    {'$abs':{'$subtract':[g, '$g']}},
-                    {'$abs':{'$subtract':[b, '$b']}}
-                    ]}
-                  },
-                  doc:'$$ROOT'
-                },
-               {'$sort':{diff:1}},
-               {'$limit':1}
-              ]).allowDiskUse(true).exec(results => {
-                docs.push(results.filename)
-              })
-            }
-            console.log(docs)
-          })
-      })
+    }]).then(async option => {
+        option = {
+          filename:"4 - Fyt8Egq.jpg",
+          sideCount:16,
+          tileWidth: 32,
+          tileHeight: 32,
+        }; 
+        sharp('./source_images/' + option.filename)
+             //resize to smatch number of iamges to use
+            .resize(option.sideCount, option.sideCount)
+             //use buffer for pixelGetter
+            .raw()
+            .toBuffer()
+            .then(async pixelData => {
+                    const docs = []
+                    const pixels = []
+                    for (let i = 0; i < pixelData.length; i+=3) {
+                        let r = pixelData[i]
+                        let g = pixelData[i+1]
+                        let b = pixelData[i+2]
+                        pixels.push(`rgb(${r},${g},${b})`)
+                        i%30 === 0?console.log('match colors:', `rgb(${r},${g},${b})`):null
+                        // find closest match in db sqrt((r1 -r2)^2 + (g1 -g2)^2 +(b1 -b2)^2)
+                        await ImageDb.aggregate([{
+                                $project: {
+                                    diff: {
+                                        '$sqrt': {
+                                            $add: [
+                                                { '$pow': [{ '$subtract': [r, '$b'] }, 2] },
+                                                { '$pow': [{ '$subtract': [g, '$g'] }, 2] },
+                                                { '$pow': [{ '$subtract': [b, '$r'] }, 2] }
+                                            ]
+                                        }
+
+                                    },
+                                    doc: '$$ROOT'
+                                },
+
+                            },
+                            { $sort: { diff: 1 } },
+                            { $limit: 1 }
+                        ]).allowDiskUse(true).then(results => {
+                            i%30 === 0?console.log('dc colors',`rgb(${results[0].doc.r},${results[0].doc.g},${results[0].doc.b})`):null
+                            docs.push('./source_images/'+ results[0].doc.filename)
+                            pixels.push(`rgb(${results[0].doc.b},${results[0].doc.g},${results[0].doc.r})`)
+                        })
+                    }
+
+                    console.log('docs length:', docs.length)
+                    const newCanvas = new canvas(option.sideCount*option.tileHeight, option.sideCount*option.tileWidth)
+                    const ctx = newCanvas.getContext('2d')
+                    const secondCanvas = new canvas(option.sideCount, option.sideCount)
+                    const ctxTwo = secondCanvas.getContext('2d')
+                    for (let i = 0; i < option.sideCount; i++) {
+                      for (let k = 0; k < option.sideCount; k++) {
+                        let color = pixels[(i*option.sideCount)+k]
+                        ctxTwo.fillStyle = color
+                        ctxTwo.fillRect(k,i,1,1)
+                      }
+                    }
+                    for (let i = 0; i < docs.length; i++) {
+                      i%10 === 0?console.log('fina;l build loop:', i):null
+                      tileImage(docs[i], i, option, ctx)
+                    }
+                    newCanvas.toBuffer(function(err, buf){
+                      sharp(buf).toFile('mosaic.jpeg', (err, info)=>{
+                        console.log(err, info)
+                      })
+                    });
+                    secondCanvas.toBuffer(function(err, buf){
+                      sharp(buf).toFile('pixelImage.jpeg', (err, info)=>{
+                        console.log(err, info)
+                      })
+                    });
+                
+            })
     })
 }
 
-const start = _=>
-  inquirer.prompt(home()).then(async answer => {
-    if (answer.option === 'run') {
-        let fileArr = fs.readdirSync(current_values.IMAGESOURCE)
-        fileArr = fileArr.slice(current_values.STARTINGVALUE, current_values.STARTINGVALUE + current_values.TOTALIMAGES)
-        for (var i = 0; i < fileArr.length ;i++) {
-            await getImageAvg(fileArr[i], i)
-        }
-        console.log('Finished!')
-    } else if(answer.option === 'analyze photo'){
-      analyzePhoto()
-    }else {
-        changeSettings()
+const buildDatabase = async _ => {
+    // grab array of all file names
+    let fileArr = fs.readdirSync(current_values.IMAGESOURCE)
+    //use settings to chose which files to process
+    fileArr = fileArr.slice(current_values.STARTINGVALUE, current_values.STARTINGVALUE + current_values.TOTALIMAGES)
+    for (let i = 0; i < fileArr.length; i++) {
+        //await to prevent freezing and to allow to run in background
+        await getImageAvg(fileArr[i], i)
     }
-})
+    console.log('Finished!')
+}
+
+//program intro/main menu
+const start = _ =>
+    // use home function to keep current settings shown correctly
+    inquirer.prompt(home()).then(async answer => {
+        if (answer.option === 'run') {
+            buildDatabase()
+        } else if (answer.option === 'analyze photo') {
+            analyzePhoto()
+        } else {
+            changeSettings()
+        }
+    })
 
 start()
