@@ -3,7 +3,6 @@ const fs = require('fs')
 const mongoose = require("mongoose")
 const ImageDb = require('./image')
 const average = require('image-average-color')
-const gm = require('gm')
 const sharp = require('sharp');
 const canvas = require('canvas-prebuilt')
 const ProgressBar = require('progress')
@@ -90,7 +89,7 @@ const changeSettings = _ =>
 
 const getImageAvg = async(imagePath, index) => {
     return new Promise(resolve => {
-        gm('./source_images/' + imagePath).resize(1, 1).toBuffer(function(err, buffer) {
+        sharp('./source_images/' + imagePath).resize(1, 1).toBuffer(function(err, buffer) {
             const r = buffer.readUInt8(buffer.length - 3)
             const g = buffer.readUInt8(buffer.length - 2)
             const b = buffer.readUInt8(buffer.length - 1)
@@ -150,10 +149,10 @@ const analyzePhoto = _ => {
         message: "Enter tile height:",
     }]).then(async option => {
 
-        options.filename === "" ? option.filename = "4 - Fyt8Egq.jpg" : null
-        options.sideCount === "" ? option.sideCount = 128 : option.sideCount = parseInt(option.sideCount)
-        options.tileWidth === "" ? option.tileWidth = 16 : option.tileWidth = parseInt(option.tileWidth)
-        options.tileHeight === "" ? option.tileHeight = 16 : option.tileHeight = parseInt(option.tileHeight)
+        option.filename === "" ? option.filename = "4 - Fyt8Egq.jpg" : null
+        option.sideCount === "" ? option.sideCount = 128 : option.sideCount = parseInt(option.sideCount)
+        option.tileWidth === "" ? option.tileWidth = 16 : option.tileWidth = parseInt(option.tileWidth)
+        option.tileHeight === "" ? option.tileHeight = 16 : option.tileHeight = parseInt(option.tileHeight)
 
         sharp('./source_images/' + option.filename)
             //resize to smatch number of iamges to use
